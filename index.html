@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAI API Request Tester</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        h1, h2 {
+            color: #333;
+            text-align: center;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        textarea, input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        button {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #results, #progress, #successfulUrls {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+        .copyable {
+            cursor: pointer;
+            color: blue;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>OpenAI API Request Tester</h1>
+    <div class="input-group">
+        <label for="baseUrls">Base URLs:</label>
+        <textarea id="baseUrls" placeholder="Enter base URLs, one per line">http://45.159.211.109:7777
+http://45.159.208.90:8444
+http://118.25.198.103:8444
+http://45.159.208.220:5555
+http://194.36.209.120:8444
+http://198.144.180.166:8444</textarea>
+    </div>
+    <div class="input-group">
+        <label for="apiKey">API Key:</label>
+        <input type="text" id="apiKey" placeholder="Enter API Key" value="aaa">
+    </div>
+    <div class="input-group">
+        <label for="model">Model:</label>
+        <input type="text" id="model" value="claude-3-haiku-20240307">
+    </div>
+    <div class="input-group">
+        <label for="prompt">Prompt:</label>
+        <input type="text" id="prompt" value="hi">
+    </div>
+    <button onclick="testUrls()">Test URLs</button>
+    <div id="progress"></div>
+    <div id="results"></div>
+    <h2>Successful URLs (Status 200)</h2>
+    <div id="successfulUrls"></div>
+
+    <script>
+        async function openaiRequest(prompt, baseUrl, apiKey, model) {
+            const headers = {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            };
+
+            const body = {
+                model: model,
+                messages: [
+                    {
+                        role: "user",
+                        content: prompt
+                    }
+                ]
+            };
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);  // 10 seconds timeout
+
+            try {
+                const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(body),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                
+                if (response.status === 200) {
+                    const data = await response.json();
+                    return {
+                        status: response.status,
+                        ok: response.ok,
+                        text: data.choices[0].message.content
+                    };
+                }
+                
+                return {
+                    status: response.status,
+                    ok: response.ok
+                };
+            } catch (error) {
+                clearTimeout(timeoutId);
+                console.error('Error:', error);
+                return {
+                    status: 'Error',
+                    ok: false,
+                    error: error.name === 'AbortError' ? 'Request timed out' : error.message
+                };
+            }
+        }
+
+        async function testUrls() {
+            const baseUrls = document.getElementById('baseUrls').value.split('\n').filter(url => url.trim() !== '');
+            const apiKey = document.getElementById('apiKey').value;
+            const model = document.getElementById('model').value;
+            const prompt = document.getElementById('prompt').value;
+            const resultsDiv = document.getElementById('results');
+            const progressDiv = document.getElementById('progress');
+            const successfulUrlsDiv = document.getElementById('successfulUrls');
+            resultsDiv.innerHTML = '';
+            progressDiv.innerHTML = '';
+            successfulUrlsDiv.innerHTML = '';
+
+            const successfulUrls = [];
+
+            for (const baseUrl of baseUrls) {
+                progressDiv.innerHTML = `正在检测 ${baseUrl}...`;
+                const result = await openaiRequest(prompt, baseUrl.trim(), apiKey, model);
+                const statusClass = result.ok ? 'success' : 'error';
+                let statusText = result.status;
+                if (result.error) {
+                    statusText += ` (${result.error})`;
+                }
+                if (result.text) {
+                    statusText += `<br>回复: ${result.text}`;
+                }
+                resultsDiv.innerHTML += `<p>${baseUrl}: <span class="${statusClass}">${statusText}</span></p>`;
+
+                if (result.status === 200) {
+                    successfulUrls.push(baseUrl.trim());
+                }
+            }
+            progressDiv.innerHTML = '检测完成！';
+
+            if (successfulUrls.length > 0) {
+                successfulUrlsDiv.innerHTML = successfulUrls.map(url => 
+                    `<p><span class="copyable" onclick="copyToClipboard('${url}')">${url}</span></p>`
+                ).join('');
+            } else {
+                successfulUrlsDiv.innerHTML = '<p>没有状态码为200的URL</p>';
+            }
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('URL已复制到剪贴板');
+            }).catch(err => {
+                console.error('无法复制URL: ', err);
+            });
+        }
+    </script>
+</body>
+</html>
